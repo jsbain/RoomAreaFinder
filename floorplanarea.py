@@ -101,10 +101,20 @@ class RoomAreaOverlay(ui.View):
 				# set starting point for next line segment
 				p0=p
 			pth.stroke() # draw the path
+			if len(drawpts)>2: # 'close' the path to show area computed
+				with ui.GState():
+					pth=ui.Path()
+					pth.move_to(*drawpts[-1])
+					pth.line_to(*drawpts[0])
+					pth.set_line_dash([2,3])
+					ui.set_color((1,.5,.5,.5))
+					pth.stroke()
 			# create a 10 pixel circle at last entered point
-			# could do this in a loop to show where 'handles' are
 			ui.Path.oval(drawpts[-1][0]-5,drawpts[-1][1]-5,10,10).fill()
-
+			# show circles for previously entered points. smaller and lighter
+			ui.set_color((1,.5,.5))
+			for p in drawpts[0:-1]:
+				ui.Path.oval(p[0]-3,p[1]-3,6,6).fill()
 def polygonArea(X, Y,scale):
 	'''compute scaled area of polygon,assuming it is closed '''
 	area = 0
