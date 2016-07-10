@@ -1,9 +1,33 @@
-#!python2
+#!python3
 # coding: utf-8
-import ui
+import ui,sys,console
+from Gestures import Gestures
+sys.path.append('../objc_hacks')
+import swizzle
+from objc_util import CGPoint, on_main_thread, ObjCInstance,ObjCClass,UIApplication
+l=[]
+def recognizer_should_simultaneously_recognize(gr,ogr):
+	g=ObjCInstance(gr)
+	o=ObjCInstance(ogr)
+	ispinch=g._get_objc_classname()==b'UIPinchGestureRecognizer'
+	ispan=g._get_objc_classname()==b'UIPanGestureRecognizer'
+	istap=g._get_objc_classname()==b'UITapGestureRecognizer'
+	if (ispinch or ispan or istap) and (g.view()==o.view()) :
+		return True
+	else:
+		return False
+def gestureRecognizer_shouldRequireFailureOfGestureRecognizer_(
+	_self,_sel,gr,othergr):
+	console.hud_alert('aaa')
+	return True
+cls=ObjCClass(UIApplication.sharedApplication()._rootViewControllers()[0]._get_objc_classname())
+swizzle.swizzle(cls,
+								'gestureRecognizer:shouldRequireFailureOfGestureRecognizer:',gestureRecognizer_shouldRequireFailureOfGestureRecognizer_,'c@:@@')
 class RoomAreaView(ui.View):
-	''' top level container, consisting of an imageview and an overlay.  
+	''' top level container, consisting of an imageview and an overlay	.  
 	ideally this might also contain a menu bar, for changing the mode - for instance you might have a button for enabling room drawing, another one for editing points, another for zoom/pan'''
+	def scrollview_should_scroll(self,sv):
+		return false
 	def __init__(self,file):
 		#create image view that fills this top level view.
 		#  since this RoomAreaView is the one that gets presented, it will be resized automatically, so we want the imageview to stay tied to the full view size, so we use flex.  Also, the content mode is important to prevent the image from being squished
@@ -14,14 +38,40 @@ class RoomAreaView(ui.View):
 		# right now, read in file from constructor.  a future improvement would be to have a file menu to select an image, which sets the iv.image
 		iv.image=ui.Image.named(file)
 		iv.touch_enabled=False
+		self.iv=iv
 		# add the overlay. this is the touch sensitive 'drawing' layer, and store a refernce to it.  this is set to the same size as the imageview
 		rv=RoomAreaOverlay(frame=self.bounds, flex='wh')
 		self.add_subview(rv)
 		self.rv=rv
+		self.g=Gestures(delegate=rv)
+		self.pinch=self.g.add_pinch(self,self.did_pinch)
+		self.pan=self.g.add_pan(self,self.did_pan,2,2)
+		self.pan1=self.g.add_pan(self.rv,self.rv.touch_movedn,1,1)
+		self.tap=self.g.add_tap(self.rv, self.rv.touch_movedn,1,1)
+		self.tap.requireGestureRecognizerToFail_(self.pinch)
+		self.tap.requireGestureRecognizerToFail_(self.pan)
+		self.prevscale=1
+		self.curscale=1
+		self.tr=(0,0)
+		self.prevtr=(0,0)
+	def did_pinch(self, data):
+
+		s=data.scale
+		self.rv.transform=self.rv.transform.concat(self.rv.transform.scale(s,s))
+		self.iv.transform=self.iv.transform.concat(self.iv.transform.scale(s,s))
+		self.pinch.scale=1.0
+
+	def did_pan(self,data):
+		o=data.translation
+		self.rv.transform=self.rv.transform.concat(self.rv.transform.translation(*o))
+		self.iv.transform=self.iv.transform.concat(self.iv.transform.translation(*o))
+		self.p=CGPoint(0,0)
+		self.pan.setTranslation_inView_(self.p,self.pan.view())
 	def will_close(self):
 		'''upon close, dump out the current area.  do this by first getting the set of points.  The zip notation lets us convert from a tuple of the form ((x0,y0),(x1,y1),...) to x=(x0,x1,...) and y=(y0,y1,...)'''
-		x,y=zip(*self.rv.pts)
-		print polygonArea(x,y,float(self.rv.scale.text))
+		if self.pts:
+			x,y=zip(*self.rv.pts)
+			print (polygonArea(x,y,float(self.rv.scale.text)))
 class RoomAreaOverlay(ui.View):
 	'''A touch sensitive overlay.  Touches add to a list of points, which are then used to compute area.  Lengths are shown for each line segment, snd a scaling parameter is used to adjust the length of drawn lines to known dimensions'''
 	def __init__(self,*args,**kwargs):
@@ -50,10 +100,15 @@ class RoomAreaOverlay(ui.View):
 		self.set_needs_display()
 	def update_area(self):
 		'''update the area label by computing the polygon area with current scale value''' 
-		x,y=zip(*self.pts)
-		area=polygonArea(x,y,float(self.scale.text))
-		self.lbl.text='Area: {} squnits'.format(area)
-	def touch_began(self,touch):
+		try:
+			x,y=zip(*self.pts)
+			area=polygonArea(x,y,float(self.scale.text))
+			self.lbl.text='Area: {} squnits'.format(area)
+		except ValueError:
+			pass
+	def tap_handler(self,touch):
+		pass
+	def touch_begann(self,touch):
 		'''when starting a touch, fiest check if there are any points very near by.  if so, set currpt to that to allow dragging prsvious points,
 		if not, add a new point.
 		'''
@@ -67,15 +122,28 @@ class RoomAreaOverlay(ui.View):
 		if self.curridx==-1:
 			self.pts.append(currpt)
 		self.set_needs_display()	
-	def touch_moved(self,touch):
+	def touch_movedn(self,touch):
 		''' update the current point, and redraw'''
-		self.pts[self.curridx]=(touch.location.x,touch.location.y)
+		if touch.state==1:
+			self.touch_begann(touch)
+			return
+		elif touch.state==2:
+			self.pts[self.curridx]=(touch.location.x,touch.location.y)
+		elif touch.state==3:
+			self.touch_endedn(touch)
+			return
+		else:
+			print(touch.state)
 		self.set_needs_display()	
-	def touch_ended(self,touch):
+	def touch_endedn(self,touch):
 		''' called when lifting finger.  append the final point to the permanent list of pts, then clear the current point, and redraw'''
+		if self.curridx==-1:
+			self.touch_begann(touch)
 		self.curridx=-1
 		self.set_needs_display()
 		self.update_area()
+	def recognizer_should_simultaneously_recognize(self,g,og):
+		return recognizer_should_simultaneously_recognize(g,og)
 	def draw(self):
 		''' called by iOS whenever set_needs_display is called, or whenever os decides it is needed, for instance view rotates'''
 		# set color to red
@@ -124,6 +192,11 @@ def polygonArea(X, Y,scale):
 		j = i
 	return abs(area/2)
 	
-
-v=RoomAreaView('203723572.jpg')
-v.present('fullscreen')
+v=ui.View()
+rv=RoomAreaView('203723572.jpg')
+rv.flex='wh'
+v.add_subview(rv)
+#v.present('panel')
+rv.frame=(100,100,600,600)
+#v.delegate=rv 
+v.present()
