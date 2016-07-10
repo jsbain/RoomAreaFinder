@@ -197,6 +197,6 @@ rv=RoomAreaView('203723572.jpg')
 rv.flex='wh'
 v.add_subview(rv)
 #v.present('panel')
-rv.frame=(100,100,600,600)
+v.frame=(100,100,600,600)
 #v.delegate=rv 
-v.present()
+v.present('sheet')
