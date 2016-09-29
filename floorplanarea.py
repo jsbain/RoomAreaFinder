@@ -2,7 +2,7 @@
 # coding: utf-8
 import ui,sys,console
 from Gestures import Gestures
-sys.path.append('../objc_hacks')
+#sys.path.append('../objc_hacks')
 import swizzle
 from objc_util import CGPoint, on_main_thread, ObjCInstance,ObjCClass,UIApplication
 l=[]
