@@ -1,34 +1,10 @@
-#!python3
+#!python2
 # coding: utf-8
-import ui,sys,console
-from Gestures import Gestures
-#sys.path.append('../objc_hacks')
-import swizzle
-from objc_util import CGPoint, on_main_thread, ObjCInstance,ObjCClass,UIApplication
-l=[]
-def recognizer_should_simultaneously_recognize(gr,ogr):
-	g=ObjCInstance(gr)
-	o=ObjCInstance(ogr)
-	ispinch=g._get_objc_classname()==b'UIPinchGestureRecognizer'
-	ispan=g._get_objc_classname()==b'UIPanGestureRecognizer'
-	istap=g._get_objc_classname()==b'UITapGestureRecognizer'
-	if (ispinch or ispan or istap) and (g.view()==o.view()) :
-		return True
-	else:
-		return False
-def gestureRecognizer_shouldRequireFailureOfGestureRecognizer_(
-	_self,_sel,gr,othergr):
-	console.hud_alert('aaa')
-	return True
-cls=ObjCClass(UIApplication.sharedApplication()._rootViewControllers()[0]._get_objc_classname())
-swizzle.swizzle(cls,
-								'gestureRecognizer:shouldRequireFailureOfGestureRecognizer:',gestureRecognizer_shouldRequireFailureOfGestureRecognizer_,'c@:@@')
+import ui, photos
 class RoomAreaView(ui.View):
-	''' top level container, consisting of an imageview and an overlay	.  
+	''' top level container, consisting of an imageview and an overlay.  
 	ideally this might also contain a menu bar, for changing the mode - for instance you might have a button for enabling room drawing, another one for editing points, another for zoom/pan'''
-	def scrollview_should_scroll(self,sv):
-		return false
-	def __init__(self,file=None, data=None):
+	def __init__(self,file):
 		#create image view that fills this top level view.
 		#  since this RoomAreaView is the one that gets presented, it will be resized automatically, so we want the imageview to stay tied to the full view size, so we use flex.  Also, the content mode is important to prevent the image from being squished
 		iv=ui.ImageView(frame=self.bounds)
@@ -36,47 +12,18 @@ class RoomAreaView(ui.View):
 		iv.content_mode=ui.CONTENT_SCALE_ASPECT_FIT
 		self.add_subview(iv)
 		# right now, read in file from constructor.  a future improvement would be to have a file menu to select an image, which sets the iv.image
-		if file:
-			iv.image=ui.Image.named(file)
-		else:
-			iv.image=ui.Image.from_data(data)
+		iv.image=ui.Image.named(file)
 		iv.touch_enabled=False
-		self.iv=iv
 		# add the overlay. this is the touch sensitive 'drawing' layer, and store a refernce to it.  this is set to the same size as the imageview
 		rv=RoomAreaOverlay(frame=self.bounds, flex='wh')
 		self.add_subview(rv)
 		self.rv=rv
-		self.g=Gestures(delegate=rv)
-		self.pinch=self.g.add_pinch(self,self.did_pinch)
-		self.pan=self.g.add_pan(self,self.did_pan,2,2)
-		self.pan1=self.g.add_pan(self.rv,self.rv.touch_movedn,1,1)
-		self.tap=self.g.add_tap(self.rv, self.rv.touch_movedn,1,1)
-		self.tap.requireGestureRecognizerToFail_(self.pinch)
-		self.tap.requireGestureRecognizerToFail_(self.pan)
-		self.prevscale=1
-		self.curscale=1
-		self.tr=(0,0)
-		self.prevtr=(0,0)
-	def did_pinch(self, data):
-
-		s=data.scale
-		self.rv.transform=self.rv.transform.concat(self.rv.transform.scale(s,s))
-		self.iv.transform=self.iv.transform.concat(self.iv.transform.scale(s,s))
-		self.pinch.scale=1.0
-
-	def did_pan(self,data):
-		o=data.translation
-		self.rv.transform=self.rv.transform.concat(self.rv.transform.translation(*o))
-		self.iv.transform=self.iv.transform.concat(self.iv.transform.translation(*o))
-		self.p=CGPoint(0,0)
-		self.pan.setTranslation_inView_(self.p,self.pan.view())
 	def will_close(self):
 		'''upon close, dump out the current area.  do this by first getting the set of points.  The zip notation lets us convert from a tuple of the form ((x0,y0),(x1,y1),...) to x=(x0,x1,...) and y=(y0,y1,...)'''
-		if self.pts:
-			x,y=zip(*self.rv.pts)
-			print (polygonArea(x,y,float(self.rv.scale.text)))
+		x,y=zip(*self.rv.pts)
+		print polygonArea(x,y,float(self.rv.scale.value)), self.rv.scale.value
 class RoomAreaOverlay(ui.View):
-	'''A touch sensitive overlay.  Touches add to a list of points, which are then used to compute area.  Lengths are shown for each line segment, snd a scaling parameter is used to adjust the length of drawn lines to known dimensions'''
+	'''A touch sensitive overlay.  Touches add to a list of points, which are then used to compute area.  Lengths are shown for each line segment, and a scaling parameter is used to adjust the length of drawn lines to known dimensions'''
 	def __init__(self,*args,**kwargs):
 		# call View.__init__ so we can handle any standard view constructor arguments, such as frame, bg_color, etc
 		ui.View.__init__(self,*args,**kwargs)
@@ -88,10 +35,10 @@ class RoomAreaOverlay(ui.View):
 		# scale is in units of feet/pixel, or really measurementunits/pixel
 		# it might be easier to have user enter this as 1/scale (pixel/measunit), so that it will be a number >1.  
 		# If using a Slider instead, use self.scale.value instead of float(self.scale.text) elsewhere 
-		self.scale=ui.TextField(frame=(50,0,100,30))
+		self.scale=ui.Slider(frame=(400,0,500,30))
 		self.scale.action=self.set_scale
 		self.add_subview(self.scale)
-		self.scale.text=str(0.08)
+	#	self.scale.text=self.scale.value
 		# create a label showing current computer room area
 		self.lbl=ui.Label(frame=(200,0,130,30))
 		self.lbl.text='Area'
@@ -103,15 +50,10 @@ class RoomAreaOverlay(ui.View):
 		self.set_needs_display()
 	def update_area(self):
 		'''update the area label by computing the polygon area with current scale value''' 
-		try:
-			x,y=zip(*self.pts)
-			area=polygonArea(x,y,float(self.scale.text))
-			self.lbl.text='Area: {} squnits'.format(area)
-		except ValueError:
-			pass
-	def tap_handler(self,touch):
-		pass
-	def touch_begann(self,touch):
+		x,y=zip(*self.pts)
+		area=polygonArea(x,y,self.scale.value/10)
+		self.lbl.text='Area: {} squnits'.format(area)
+	def touch_began(self,touch):
 		'''when starting a touch, fiest check if there are any points very near by.  if so, set currpt to that to allow dragging prsvious points,
 		if not, add a new point.
 		'''
@@ -125,28 +67,15 @@ class RoomAreaOverlay(ui.View):
 		if self.curridx==-1:
 			self.pts.append(currpt)
 		self.set_needs_display()	
-	def touch_movedn(self,touch):
+	def touch_moved(self,touch):
 		''' update the current point, and redraw'''
-		if touch.state==1:
-			self.touch_begann(touch)
-			return
-		elif touch.state==2:
-			self.pts[self.curridx]=(touch.location.x,touch.location.y)
-		elif touch.state==3:
-			self.touch_endedn(touch)
-			return
-		else:
-			print(touch.state)
+		self.pts[self.curridx]=(touch.location.x,touch.location.y)
 		self.set_needs_display()	
-	def touch_endedn(self,touch):
+	def touch_ended(self,touch):
 		''' called when lifting finger.  append the final point to the permanent list of pts, then clear the current point, and redraw'''
-		if self.curridx==-1:
-			self.touch_begann(touch)
 		self.curridx=-1
 		self.set_needs_display()
 		self.update_area()
-	def recognizer_should_simultaneously_recognize(self,g,og):
-		return recognizer_should_simultaneously_recognize(g,og)
 	def draw(self):
 		''' called by iOS whenever set_needs_display is called, or whenever os decides it is needed, for instance view rotates'''
 		# set color to red
@@ -168,7 +97,7 @@ class RoomAreaOverlay(ui.View):
 				P0=ui.Point(*p0)
 				H=P0+L/2 #halfway point
 				# put text at the halfway point, containing length ofmsegment * scale
-				ui.draw_string('%3.2f'%abs(L*float(self.scale.text)),(H.x,H.y,0,0),color='red')
+				ui.draw_string('%3.2f'%abs(L*self.scale.value/10),(H.x,H.y,0,0),color='red')
 				# set starting point for next line segment
 				p0=p
 			pth.stroke() # draw the path
@@ -190,19 +119,11 @@ def polygonArea(X, Y,scale):
 	'''compute scaled area of polygon,assuming it is closed '''
 	area = 0
 	j = len(X) - 1
-	for i in range(len(X)):
+	for i in range(len(X)): 
 		area = area + (X[j] + X[i]) * (Y[j] - Y[i])*scale**2
 		j = i
 	return abs(area/2)
 	
-if __name__=='__main__':
-	import photos, time
-	data=photos.pick_image(raw_data=True)
-	time.sleep(0.5)
-	v=ui.View()
-	#rv=RoomAreaView(file='203723572.jpg')
-	rv=RoomAreaView(data=data)
-	rv.flex='wh'
-	v.add_subview(rv)
-	v.frame=(100,100,600,600)
-	v.present('sheet')
+photos.pick_image().save("temp.jpg")
+v=RoomAreaView('temp.jpg')
+v.present('fullscreen')
