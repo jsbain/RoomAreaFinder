@@ -20,9 +20,23 @@ def gestureRecognizer_shouldRequireFailureOfGestureRecognizer_(
 	_self,_sel,gr,othergr):
 	console.hud_alert('aaa')
 	return True
+	
 cls=ObjCClass(UIApplication.sharedApplication()._rootViewControllers()[0]._get_objc_classname())
 swizzle.swizzle(cls,
 								'gestureRecognizer:shouldRequireFailureOfGestureRecognizer:',gestureRecognizer_shouldRequireFailureOfGestureRecognizer_,'c@:@@')
+								
+def math_eval(expr):
+	import math
+	import re
+	whitelist = '|'.join(
+	# oprators, digits
+	['-', '\+', '/', '\\', '\*', '\^', '\*\*', '\(', '\)', '\d+' ])
+
+	if re.match(whitelist,expr):
+		return eval(expr)
+	else:
+		return 1.0
+																									
 class RoomAreaView(ui.View):
 	''' top level container, consisting of an imageview and an overlay	.  
 	ideally this might also contain a menu bar, for changing the mode - for instance you might have a button for enabling room drawing, another one for editing points, another for zoom/pan'''
@@ -57,6 +71,10 @@ class RoomAreaView(ui.View):
 		self.curscale=1
 		self.tr=(0,0)
 		self.prevtr=(0,0)
+		
+		clear=ui.Button(title='clear')
+		clear.action=rv.clear
+		self.add_subview(clear)
 	def did_pinch(self, data):
 
 		s=data.scale
@@ -97,6 +115,12 @@ class RoomAreaOverlay(ui.View):
 		self.lbl.text='Area'
 		self.add_subview(self.lbl)
 		self.lbl.bg_color='white'
+	def clear(self,sender):
+		self.pts=[]
+		self.set_needs_display()
+	def get_text_scale(self):
+
+		return math_eval(self.scale.text)
 	def set_scale(self,sender):
 		'''action for self.scale. called whenever scale is changed.  when that happens we update the computation of room area, and also call set_needs_display, which forces a redraw, thus redrawing distance units'''
 		self.update_area()
@@ -105,7 +129,7 @@ class RoomAreaOverlay(ui.View):
 		'''update the area label by computing the polygon area with current scale value''' 
 		try:
 			x,y=zip(*self.pts)
-			area=polygonArea(x,y,float(self.scale.text))
+			area=polygonArea(x,y,self.get_text_scale())
 			self.lbl.text='Area: {} squnits'.format(area)
 		except ValueError:
 			pass
@@ -168,7 +192,7 @@ class RoomAreaOverlay(ui.View):
 				P0=ui.Point(*p0)
 				H=P0+L/2 #halfway point
 				# put text at the halfway point, containing length ofmsegment * scale
-				ui.draw_string('%3.2f'%abs(L*float(self.scale.text)),(H.x,H.y,0,0),color='red')
+				ui.draw_string('%3.2f'%abs(L*float(self.get_text_scale())),(H.x,H.y,0,0),color='red')
 				# set starting point for next line segment
 				p0=p
 			pth.stroke() # draw the path
@@ -197,8 +221,12 @@ def polygonArea(X, Y,scale):
 	
 if __name__=='__main__':
 	import photos, time
-	data=photos.pick_image(raw_data=True)
-	time.sleep(0.5)
+	@on_main_thread
+	def pick_image():
+		data=photos.pick_image(raw_data=True)
+		return data
+	data=pick_image()
+	time.sleep(1.)
 	v=ui.View()
 	#rv=RoomAreaView(file='203723572.jpg')
 	rv=RoomAreaView(data=data)
